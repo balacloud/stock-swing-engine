@@ -1,0 +1,3 @@
+body { margin: 0; font-family: system-ui; background: #f9fbfc; color: #222; }
+button { cursor: pointer; }
+.score { font-size: 2rem; font-weight: bold; }
