@@ -36,8 +36,11 @@ export default function App() {
       axios.get(`${base}&function=EARNINGS&symbol=${sym}`),
       axios.get(`${base}&function=NEWS_SENTIMENT&tickers=${sym}&limit=20`),
       axios.get(`${base}&function=SECTOR`),
-      axios.get(`https://query1.finance.yahoo.com/v7/finance/quote?symbols=${sym}`),
-      axios.get(`https://query1.finance.yahoo.com/v7/finance/quote?symbols=^GSPC`),
+      axios.get(`${base}&function=GLOBAL_QUOTE&symbol=${sym}`),  // For stock price
+      axios.get(`${base}&function=GLOBAL_QUOTE&symbol=^GSPC`),  // For S&P price
+      axios.get(`${base}&function=SMA&symbol=^GSPC&interval=daily&time_period=200&series_type=close`),  // S&P 200-day SMA
+      //axios.get(`https://query1.finance.yahoo.com/v7/finance/quote?symbols=${sym}`),
+      //axios.get(`https://query1.finance.yahoo.com/v7/finance/quote?symbols=^GSPC`),
       axios.get(`${base}&function=HISTORICAL_OPTIONS&symbol=${sym}&date=latest`)
     ])
     return { daily: daily.data, rsi: rsi.data, macd: macd.data, obv: obv.data, adx: adx.data, bbands: bbands.data, overview: overview.data, earnings: earnings.data, news: news.data, sector: sector.data, yahoo: yahoo.data.quoteResponse.result[0], sp500: sp500.data.quoteResponse.result[0], options: options.data }
@@ -70,6 +73,11 @@ export default function App() {
   const analyze = (d) => {
     if (!d || !d.daily) return null
 
+    const price = parseFloat(d.globalQuote['Global Quote']['05. price']);  // Stock price
+    const sp500Price = parseFloat(d.spGlobalQuote['Global Quote']['05. price']);  // S&P price
+    const sp200SMA = parseFloat(latest(d.spSMA, 'SMA').cur.SMA);  // S&P 200-day
+    const marketUp = sp500Price > sp200SMA;
+
     const dailyTS = d.daily['Time Series (Daily)']
     const pattern = detectPattern(dailyTS)
 
@@ -88,7 +96,7 @@ export default function App() {
     const obvPrev = parseFloat(latest(d.obv, 'OBV').prev.OBV)
     const obvBull = obvCur > obvPrev
 
-    const price = d.yahoo.regularMarketPrice
+   // const price = d.yahoo.regularMarketPrice
     const sma50 = parseFloat(d.overview['50DayMovingAverage'] || 0)
     const sma200 = parseFloat(d.overview['200DayMovingAverage'] || 0)
     const aboveMA = price > sma50 && sma50 > sma200
@@ -100,7 +108,7 @@ export default function App() {
     const sentiments = d.news.feed?.map(n => n.ticker_sentiment?.find(t => t.ticker === querySymbol)?.ticker_sentiment_score) || []
     const avgSentiment = sentiments.length ? sentiments.reduce((a,b) => a + parseFloat(b||0), 0)/sentiments.length : 0
 
-    const marketUp = d.sp500.regularMarketPrice > d.sp500.twoHundredDayAverage
+    //const marketUp = d.sp500.regularMarketPrice > d.sp500.twoHundredDayAverage
     const sectorRank = d.sector['Rank A: Real-Time Performance']?.[d.overview.Sector] || 'N/A'
 
     const oiData = d.options?.options?.[0]?.calls || []
