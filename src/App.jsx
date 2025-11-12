@@ -26,7 +26,7 @@ export default function App() {
     if (!savedKey) throw new Error('API key required')
     const base = `https://www.alphavantage.co/query?apikey=${savedKey}`
     try {
-      const [daily, rsi, macd, obv, adx, bbands, overview, earnings, news, sector, globalQuote, spGlobalQuote, spSMA, options] = await Promise.all([
+      const responses = await Promise.allSettled([
         axios.get(`${base}&function=TIME_SERIES_DAILY_ADJUSTED&symbol=${sym}&outputsize=compact`),
         axios.get(`${base}&function=RSI&symbol=${sym}&interval=daily&time_period=14&series_type=close`),
         axios.get(`${base}&function=MACD&symbol=${sym}&interval=daily`),
@@ -41,11 +41,38 @@ export default function App() {
         axios.get(`${base}&function=GLOBAL_QUOTE&symbol=^GSPC`),
         axios.get(`${base}&function=SMA&symbol=^GSPC&interval=daily&time_period=200&series_type=close`),
         axios.get(`${base}&function=HISTORICAL_OPTIONS&symbol=${sym}&date=latest`)
-      ])
-      return { daily: daily.data, rsi: rsi.data, macd: macd.data, obv: obv.data, adx: adx.data, bbands: bbands.data, overview: overview.data, earnings: earnings.data, news: news.data, sector: sector.data, globalQuote: globalQuote.data, spGlobalQuote: spGlobalQuote.data, spSMA: spSMA.data, options: options.data }
+      ]);
+
+      const data = responses.map((res, index) => {
+        if (res.status === 'rejected') {
+          console.error(`Fetch error for endpoint ${index}:`, res.reason.message);
+          return {};
+        }
+        if (res.value.data['Note']) {
+          console.warn(`Rate limit note for endpoint ${index}:`, res.value.data['Note']);
+        }
+        return res.value.data;
+      });
+
+      return {
+        daily: data[0],
+        rsi: data[1],
+        macd: data[2],
+        obv: data[3],
+        adx: data[4],
+        bbands: data[5],
+        overview: data[6],
+        earnings: data[7],
+        news: data[8],
+        sector: data[9],
+        globalQuote: data[10],
+        spGlobalQuote: data[11],
+        spSMA: data[12],
+        options: data[13]
+      };
     } catch (fetchError) {
-      console.error('API Fetch Error:', fetchError.message, { symbol: sym });
-      throw new Error(`Failed to fetch data: ${fetchError.message}. Check console for details.`);
+      console.error('Global Fetch Error:', fetchError.message, { symbol: sym });
+      throw new Error(`Failed to fetch data: ${fetchError.message}. Likely rate limit or network issue.`);
     }
   }
 
@@ -80,49 +107,50 @@ export default function App() {
 
   const analyze = (d) => {
     try {
-      if (!d || !d.daily) {
-        console.warn('Missing daily data');
-        return { error: 'Missing essential data for analysis' }
+      if (!d || !d.daily || !d.globalQuote?.['Global Quote']) {
+        const note = d.globalQuote?.Note || 'Unknown issue';
+        console.warn('Missing data:', note);
+        return { error: note.includes('rate limit') ? 'Rate limit exceeded. Free tier: 25 calls/day. Try tomorrow or premium key.' : 'Missing essential data—check symbol/key.' }
       }
 
-      const price = parseFloat(d.globalQuote?.['Global Quote']?.['05. price'] || 0);
-      const sp500Price = parseFloat(d.spGlobalQuote?.['Global Quote']?.['05. price'] || 0);
-      const sp200SMA = parseFloat(latest(d.spSMA, 'SMA').cur.SMA || 0);
+      const price = parseFloat(d.globalQuote['Global Quote']['05. price'] ?? 0);
+      const sp500Price = parseFloat(d.spGlobalQuote?.['Global Quote']?.['05. price'] ?? 0);
+      const sp200SMA = parseFloat(latest(d.spSMA, 'SMA').cur.SMA ?? 0);
       const marketUp = sp500Price > sp200SMA;
 
       const dailyTS = d.daily['Time Series (Daily)'] || {}
       const pattern = detectPattern(dailyTS)
 
-      const rsi = parseFloat(latest(d.rsi, 'RSI').cur.RSI || 0)
+      const rsi = parseFloat(latest(d.rsi, 'RSI').cur.RSI ?? 0)
       const macd = latest(d.macd, 'MACD')
-      const macdBull = parseFloat(macd.cur['MACD'] || 0) > parseFloat(macd.cur['MACD_Signal'] || 0) && parseFloat(macd.prev['MACD'] || 0) <= parseFloat(macd.prev['MACD_Signal'] || 0)
-      const adx = parseFloat(latest(d.adx, 'ADX').cur.ADX || 0)
+      const macdBull = parseFloat(macd.cur['MACD'] ?? 0) > parseFloat(macd.cur['MACD_Signal'] ?? 0) && parseFloat(macd.prev['MACD'] ?? 0) <= parseFloat(macd.prev['MACD_Signal'] ?? 0)
+      const adx = parseFloat(latest(d.adx, 'ADX').cur.ADX ?? 0)
       const bb = latest(d.bbands, 'BBANDS')
-      const onLowerBand = parseFloat(dailyTS[Object.keys(dailyTS)[0]]?.['4. close'] || 0) <= parseFloat(bb.cur['Lower Band'] || 0)
+      const onLowerBand = parseFloat(dailyTS[Object.keys(dailyTS)[0]]?.['4. close'] ?? 0) <= parseFloat(bb.cur['Lower Band'] ?? 0)
 
-      const volAvg20 = Object.values(dailyTS).slice(0,20).reduce((a,v) => a + parseFloat(v?.['6. volume'] || 0), 0)/20 || 0
-      const volToday = parseFloat(Object.values(dailyTS)[0]?.['6. volume'] || 0)
+      const volAvg20 = Object.values(dailyTS).slice(0,20).reduce((a,v) => a + parseFloat(v?.['6. volume'] ?? 0), 0)/20 || 0
+      const volToday = parseFloat(Object.values(dailyTS)[0]?.['6. volume'] ?? 0)
       const volSurge = volToday > volAvg20 * 1.5
 
-      const obvCur = parseFloat(latest(d.obv, 'OBV').cur.OBV || 0)
-      const obvPrev = parseFloat(latest(d.obv, 'OBV').prev.OBV || 0)
+      const obvCur = parseFloat(latest(d.obv, 'OBV').cur.OBV ?? 0)
+      const obvPrev = parseFloat(latest(d.obv, 'OBV').prev.OBV ?? 0)
       const obvBull = obvCur > obvPrev
 
-      const sma50 = parseFloat(d.overview?.['50DayMovingAverage'] || 0)
-      const sma200 = parseFloat(d.overview?.['200DayMovingAverage'] || 0)
+      const sma50 = parseFloat(d.overview?.['50DayMovingAverage'] ?? 0)
+      const sma200 = parseFloat(d.overview?.['200DayMovingAverage'] ?? 0)
       const aboveMA = price > sma50 && sma50 > sma200
 
-      const earningsQoQ = parseFloat(d.overview?.QuarterlyEarningsGrowthYOY || 0)
-      const roe = parseFloat(d.overview?.ReturnOnEquityTTM || 0)
-      const analystTarget = parseFloat(d.overview?.AnalystTargetPrice || price * 1.35)
+      const earningsQoQ = parseFloat(d.overview?.QuarterlyEarningsGrowthYOY ?? 0)
+      const roe = parseFloat(d.overview?.ReturnOnEquityTTM ?? 0)
+      const analystTarget = parseFloat(d.overview?.AnalystTargetPrice ?? price * 1.35)
 
       const sentiments = d.news?.feed?.map(n => n.ticker_sentiment?.find(t => t.ticker === querySymbol)?.ticker_sentiment_score) || []
       const avgSentiment = sentiments.length ? sentiments.reduce((a,b) => a + parseFloat(b||0), 0)/sentiments.length : 0
 
-      const sectorRank = d.sector?.['Rank A: Real-Time Performance']?.[d.overview?.Sector] || 'N/A'
+      const sectorRank = d.sector?.['Rank A: Real-Time Performance']?.[d.overview?.Sector] ?? 'N/A'
 
-      const oiData = d.options?.options?.[0]?.calls || []
-      const oiChange = oiData.length ? oiData.reduce((a,c) => a + parseInt(c.open_interest || 0), 0) : 0
+      const oiData = d.options?.options?.[0]?.calls ?? []
+      const oiChange = oiData.length ? oiData.reduce((a,c) => a + parseInt(c.open_interest ?? 0), 0) : 0
 
       let score = 0
       if (rsi < 35) score += 12
@@ -143,7 +171,7 @@ export default function App() {
       return { score, verdict, rsi, macdBull, adx, pattern, volSurge, obvBull, aboveMA, earningsQoQ: (earningsQoQ*100).toFixed(1), avgSentiment: avgSentiment.toFixed(2), marketUp, sectorRank, oiChange, entry, exit, potential, price: price.toFixed(2) }
     } catch (analyzeError) {
       console.error('Analysis Error:', analyzeError.message, { dataKeys: Object.keys(d || {}) });
-      return { error: `Analysis failed: ${analyzeError.message}. Data may be incomplete.` }
+      return { error: `Analysis failed: ${analyzeError.message}. Likely rate limit or API issue—check console.` }
     }
   }
 
@@ -172,7 +200,7 @@ export default function App() {
       )}
 
       {isLoading && <p>Loading 13 data sources...</p>}
-      {error && <p>Error: {error.message} (check key / rate limit / network)</p>}
+      {error && <p style={{color: 'red'}}>Error: {error.message} (check key / rate limit / network)</p>}
 
       {analysis ? (
         analysis.error ? (
@@ -191,7 +219,7 @@ export default function App() {
             <h3>Trend & Market (25 pts)</h3>
             <p>Above MAs: {analysis.aboveMA?'✓':'✗'} | S&P uptrend: {analysis.marketUp?'✓':'✗'} | Sector: {analysis.sectorRank}</p>
 
-            <h3>Fundamentals & Sentiment (20 pts)</h3>
+            <h3>Fundamentals & Sentiment (20 pts</h3>
             <p>Earnings QoQ: {analysis.earningsQoQ}% | Sentiment: {analysis.avgSentiment}</p>
 
             <h3>Open Interest</h3>
