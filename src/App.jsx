@@ -25,7 +25,7 @@ export default function App() {
   const fetchAll = async (sym) => {
     if (!savedKey) throw new Error('API key required')
     const base = `https://www.alphavantage.co/query?apikey=${savedKey}`
-    const [daily, rsi, macd, obv, adx, bbands, overview, earnings, news, sector, yahoo, sp500, options] = await Promise.all([
+    const [daily, rsi, macd, obv, adx, bbands, overview, earnings, news, sector, globalQuote, spGlobalQuote, spSMA, options] = await Promise.all([
       axios.get(`${base}&function=TIME_SERIES_DAILY_ADJUSTED&symbol=${sym}&outputsize=compact`),
       axios.get(`${base}&function=RSI&symbol=${sym}&interval=daily&time_period=14&series_type=close`),
       axios.get(`${base}&function=MACD&symbol=${sym}&interval=daily`),
@@ -36,14 +36,12 @@ export default function App() {
       axios.get(`${base}&function=EARNINGS&symbol=${sym}`),
       axios.get(`${base}&function=NEWS_SENTIMENT&tickers=${sym}&limit=20`),
       axios.get(`${base}&function=SECTOR`),
-      axios.get(`${base}&function=GLOBAL_QUOTE&symbol=${sym}`),  // For stock price
-      axios.get(`${base}&function=GLOBAL_QUOTE&symbol=^GSPC`),  // For S&P price
-      axios.get(`${base}&function=SMA&symbol=^GSPC&interval=daily&time_period=200&series_type=close`),  // S&P 200-day SMA
-      //axios.get(`https://query1.finance.yahoo.com/v7/finance/quote?symbols=${sym}`),
-      //axios.get(`https://query1.finance.yahoo.com/v7/finance/quote?symbols=^GSPC`),
+      axios.get(`${base}&function=GLOBAL_QUOTE&symbol=${sym}`),
+      axios.get(`${base}&function=GLOBAL_QUOTE&symbol=^GSPC`),
+      axios.get(`${base}&function=SMA&symbol=^GSPC&interval=daily&time_period=200&series_type=close`),
       axios.get(`${base}&function=HISTORICAL_OPTIONS&symbol=${sym}&date=latest`)
     ])
-    return { daily: daily.data, rsi: rsi.data, macd: macd.data, obv: obv.data, adx: adx.data, bbands: bbands.data, overview: overview.data, earnings: earnings.data, news: news.data, sector: sector.data, yahoo: yahoo.data.quoteResponse.result[0], sp500: sp500.data.quoteResponse.result[0], options: options.data }
+    return { daily: daily.data, rsi: rsi.data, macd: macd.data, obv: obv.data, adx: adx.data, bbands: bbands.data, overview: overview.data, earnings: earnings.data, news: news.data, sector: sector.data, globalQuote: globalQuote.data, spGlobalQuote: spGlobalQuote.data, spSMA: spSMA.data, options: options.data }
   }
 
   const { data, isLoading, error } = useQuery(['all', querySymbol], () => fetchAll(querySymbol), { enabled: !!querySymbol && !!savedKey, cacheTime: 300000 })
@@ -96,7 +94,6 @@ export default function App() {
     const obvPrev = parseFloat(latest(d.obv, 'OBV').prev.OBV)
     const obvBull = obvCur > obvPrev
 
-   // const price = d.yahoo.regularMarketPrice
     const sma50 = parseFloat(d.overview['50DayMovingAverage'] || 0)
     const sma200 = parseFloat(d.overview['200DayMovingAverage'] || 0)
     const aboveMA = price > sma50 && sma50 > sma200
@@ -108,7 +105,6 @@ export default function App() {
     const sentiments = d.news.feed?.map(n => n.ticker_sentiment?.find(t => t.ticker === querySymbol)?.ticker_sentiment_score) || []
     const avgSentiment = sentiments.length ? sentiments.reduce((a,b) => a + parseFloat(b||0), 0)/sentiments.length : 0
 
-    //const marketUp = d.sp500.regularMarketPrice > d.sp500.twoHundredDayAverage
     const sectorRank = d.sector['Rank A: Real-Time Performance']?.[d.overview.Sector] || 'N/A'
 
     const oiData = d.options?.options?.[0]?.calls || []
